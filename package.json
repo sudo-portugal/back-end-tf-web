@@ -1,13 +1,22 @@
 {
-  "name": "back-end-tf",
+  "name": "backend",
   "version": "1.0.0",
-  "description": "backend",
+  "description": "API criada por Indivíduos Computaria",
   "main": "server.js",
+  "type": "module",
   "scripts": {
-  
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
   "keywords": [],
   "author": "Indivíduos Computaria",
   "license": "ISC",
-  "type": "module"
+  "dependencies": {
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
 }
