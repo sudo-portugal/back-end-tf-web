@@ -1,0 +1,30 @@
+meta {
+  name: deleteMeuCachorroTaSumido
+  type: http
+  seq: 2
+}
+
+delete {
+  url: https://fluffy-computing-machine-97wvx9q59p6vh99wq-3000.app.github.dev/lost_dog_posts/11
+  body: json
+  auth: inherit
+}
+
+params:query {
+  : 
+}
+
+body:json {
+  {
+    "password": "a"
+  }
+}
+
+body:multipart-form {
+  password: a @contentType(text)
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

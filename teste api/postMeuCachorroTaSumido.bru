@@ -1,0 +1,54 @@
+meta {
+  name: postMeuCachorroTaSumido
+  type: http
+  seq: 3
+}
+
+post {
+  url: https://fluffy-computing-machine-97wvx9q59p6vh99wq-3000.app.github.dev/lost_dog_posts
+  body: multipartForm
+  auth: inherit
+}
+
+body:json {
+  {
+    "pet_name": "Rex",
+    "description": "Cachorro encontrado na praça central, parece ser de raça pequena.",
+    "breed": "Vira-lata",
+    "color": "Marrom",
+    "neighborhood": "Centro",
+    "accessory": "Coleira vermelha",
+    "location_reference": "Perto da padaria do João",
+    "whatsapp": "+5511999999999",
+    "instagram": "@rex_found",
+    "pet_age": 3,
+    "adress": "Rua das Flores, nº 45",
+    "password": "a",
+    "post_images": [
+      {
+        "image_url": "https://opulent-enigma-jj96g547jjvpfpqwx-3000.app.github.dev/imgs/logo-75x75.png"
+      }
+    ]
+  }
+}
+
+body:multipart-form {
+  pet_name: Rexano @contentType(text)
+  description: Cachorro encontrado... @contentType(text)
+  breed: Vira-lata @contentType(text)
+  color: Marrom @contentType(text)
+  neighborhood: Centro @contentType(text)
+  password: a @contentType(text)
+  accessory: Coleira vermelha @contentType(text)
+  location_reference: Perto da padaria @contentType(text)
+  whatsapp: +5511999999999 @contentType(text)
+  instagram: @rex_found @contentType(text)
+  pet_age: 3 @contentType(text)
+  adress: Rua das Flores, 45 @contentType(text)
+  images: @file(C:\Users\Duzeba\Documents\Preview Ciclismo 13 (2).jpg) @contentType(File)
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "newTableMeuCachorroTaPerdido 2",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}
