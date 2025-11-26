@@ -34,9 +34,13 @@ app.get("/", async (req, res) => {
   });
 });
 
+// ROTA GET /lost_dog_posts (COM FILTRO)
 app.get('/lost_dog_posts', async (req, res) => {
+  const client = await pool.connect();
   try {
-    const query = `
+    const { breed, neighborhood, color } = req.query;
+
+    let query = `
       SELECT 
         p.id, p.pet_name, p.description, p.breed, p.color, p.neighborhood,
         p.accessory, p.location_reference, p.whatsapp, p.instagram,
@@ -44,177 +48,164 @@ app.get('/lost_dog_posts', async (req, res) => {
         COALESCE(
           (SELECT json_agg(json_build_object('id', i.id, 'url', i.image_url))
             FROM post_images i WHERE i.post_id = p.id),
-          '[]'::json
-        ) as images
+          '[]'::json) AS images
       FROM lost_dog_posts p
-      ORDER BY p.created_at DESC
     `;
-    const result = await pool.query(query);
+    
+    const conditions = [];
+    const values = [];
+    let paramIndex = 1;
+
+    if (breed) {
+      conditions.push(`p.breed ILIKE $${paramIndex++}`);
+      values.push(`%${breed}%`); 
+    }
+
+    if (neighborhood) {
+      conditions.push(`p.neighborhood ILIKE $${paramIndex++}`);
+      values.push(`%${neighborhood}%`);
+    }
+
+    if (color) {
+      conditions.push(`p.color ILIKE $${paramIndex++}`);
+      values.push(`%${color}%`);
+    }
+
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+    
+    query += ' ORDER BY p.created_at DESC';
+
+    const result = await client.query(query, values);
+
     res.status(200).json(result.rows);
+
   } catch (err) {
-    console.error('Erro ao buscar posts:', err);
-    res.status(500).json({ error: 'Erro interno do servidor.' });
+    console.error('Erro ao buscar posts com filtro:', err);
+    res.status(500).json({ error: 'Erro interno ao buscar posts.' });
+  } finally {
+    client.release();
   }
 });
 
+// ROTA POST /lost_dog_posts
 app.post('/lost_dog_posts', async (req, res) => {
-  const {
-    pet_name,
-    description,
-    breed,
-    color,
-    neighborhood,
-    accessory,
-    location_reference,
-    whatsapp,
-    instagram,
-    pet_age,
-    password,
-    adress,
-    images_urls
-  } = req.body;
+  const { pet_name, description, breed, color, neighborhood, accessory, location_reference, whatsapp, instagram, password, pet_age, adress, images_urls } = req.body;
 
-  if (!pet_name || !description || !breed || !color || !neighborhood || !password) {
-    return res.status(400).json({
-      error: 'Campos obrigatórios faltando: pet_name, description, breed, color, neighborhood, password.',
-    });
-  }
-
-  if (!whatsapp && !instagram) {
-    return res.status(400).json({
-      error: 'Você deve fornecer pelo menos um método de contato (WhatsApp ou Instagram).',
-    });
-  }
-
-  if (!images_urls || !Array.isArray(images_urls) || images_urls.length === 0) {
-    return res.status(400).json({ error: 'Você deve enviar pelo menos uma imagem (URL do Uploadcare).' });
+  if (!pet_name || !description || !breed || !color || !neighborhood || !whatsapp || !password || !images_urls || images_urls.length === 0) {
+    return res.status(400).json({ error: "Preencha todos os campos obrigatórios, incluindo ao menos uma imagem e a senha." });
   }
 
   const client = await pool.connect();
-
   try {
     await client.query('BEGIN');
 
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     const insertPostQuery = `
-      INSERT INTO lost_dog_posts (
-        pet_name, description, breed, color, neighborhood, 
-        accessory, location_reference, whatsapp, instagram, 
-        pet_age, password, adress
-      ) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      INSERT INTO lost_dog_posts 
+      (pet_name, description, breed, color, neighborhood, accessory, location_reference, whatsapp, instagram, password, pet_age, adress)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) 
       RETURNING id;
     `;
-    const postValues = [
-      pet_name,
-      description,
-      breed,
-      color,
-      neighborhood,
-      accessory,
-      location_reference,
-      whatsapp,
-      instagram,
-      pet_age,
-      hashedPassword,
-      adress,
-    ];
 
-    const postResult = await client.query(insertPostQuery, postValues);
-    const newPostId = postResult.rows[0].id;
+    const result = await client.query(insertPostQuery, [
+      pet_name, description, breed, color, neighborhood, accessory || null, location_reference || null, whatsapp, instagram || null, hashedPassword, pet_age || null, adress || null
+    ]);
 
-    const uploadedImageUrls = [];
+    const newPostId = result.rows[0].id;
 
     for (const imageUrl of images_urls) {
-      uploadedImageUrls.push(imageUrl);
-
       const insertImageQuery = `
         INSERT INTO post_images (post_id, image_url)
-        VALUES ($1, $2)
+        VALUES ($1, $2);
       `;
       await client.query(insertImageQuery, [newPostId, imageUrl]);
     }
 
     await client.query('COMMIT');
 
-    res.status(201).json({
-      message: "Post criado com sucesso!",
-      postId: newPostId,
-      images: uploadedImageUrls,
+    res.status(201).json({ 
+      message: 'Post criado com sucesso!', 
+      post_id: newPostId 
     });
 
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Erro ao criar post:', err);
+    res.status(500).json({ error: 'Erro interno do servidor ao criar post.' });
+  } finally {
+    client.release();
+  }
+});
+
+// ROTA GET /lost_dog_posts/:id
+app.get('/lost_dog_posts/:id', async (req, res) => {
+  const { id } = req.params;
+  const client = await pool.connect();
+
+  try {
+    const postQuery = `
+      SELECT 
+        p.id, p.pet_name, p.description, p.breed, p.color, p.neighborhood,
+        p.accessory, p.location_reference, p.whatsapp, p.instagram,
+        p.created_at, p.pet_age, p.adress, p.password,
+        COALESCE(
+          (SELECT json_agg(json_build_object('id', i.id, 'url', i.image_url))
+            FROM post_images i WHERE i.post_id = p.id),
+          '[]'::json) AS images
+      FROM lost_dog_posts p
+      WHERE p.id = $1;
+    `;
+    const postResult = await client.query(postQuery, [id]);
+
+    if (postResult.rows.length === 0) {
+      return res.status(404).json({ error: "Post não encontrado." });
+    }
+
+    const post = postResult.rows[0];
+    delete post.password; 
+
+    res.status(200).json(post);
+
+  } catch (err) {
+    console.error('Erro ao buscar post por ID:', err);
     res.status(500).json({ error: 'Erro interno do servidor.' });
   } finally {
     client.release();
   }
 });
 
-app.get('/lost_dog_posts/:id', async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const query = `
-      SELECT 
-        p.id, p.pet_name, p.description, p.breed, p.color, p.neighborhood,
-        p.accessory, p.location_reference, p.whatsapp, p.instagram,
-        p.created_at, p.pet_age, p.adress,
-        COALESCE(
-          (SELECT json_agg(json_build_object('id', i.id, 'url', i.image_url))
-            FROM post_images i WHERE i.post_id = p.id),
-          '[]'::json
-        ) as images
-      FROM lost_dog_posts p
-      WHERE p.id = $1;
-    `;
-
-    const result = await pool.query(query, [id]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Post não encontrado.' });
-    }
-
-    res.status(200).json(result.rows[0]);
-
-  } catch (err) {
-    console.error('Erro ao buscar post individual:', err);
-    res.status(500).json({ error: 'Erro interno do servidor.' });
-  }
-});
-
+// ROTA DELETE /lost_dog_posts/:id
 app.delete('/lost_dog_posts/:id', async (req, res) => {
   const { id } = req.params;
-  const { password } = req.body; 
-
+  const { password } = req.body;
+  
   if (!password) {
-    return res.status(400).json({ error: 'Senha é obrigatória.' });
+    return res.status(400).json({ error: "Senha de exclusão é obrigatória." });
   }
 
   const client = await pool.connect();
-
   try {
-    const selectQuery = 'SELECT password FROM lost_dog_posts WHERE id = $1';
-    const postResult = await client.query(selectQuery, [id]);
+    await client.query('BEGIN');
 
-    if (postResult.rows.length === 0) {
+    const passwordResult = await client.query('SELECT password FROM lost_dog_posts WHERE id = $1', [id]);
+
+    if (passwordResult.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Post não encontrado.' });
     }
 
-    const storedHashedPassword = postResult.rows[0].password;
-    const isMatch = await bcrypt.compare(password, storedHashedPassword);
+    const hashedPassword = passwordResult.rows[0].password;
 
-    if (!isMatch) {
-      return res.status(403).json({ error: 'Senha incorreta.' });
+    const isPasswordCorrect = await bcrypt.compare(password, hashedPassword);
+    if (!isPasswordCorrect) {
+      await client.query('ROLLBACK');
+      return res.status(401).json({ error: 'Senha incorreta. Não é possível deletar.' });
     }
-
-    await client.query('BEGIN');
-
-    await client.query('DELETE FROM post_images WHERE post_id = $1', [id]);
     
+    await client.query('DELETE FROM post_images WHERE post_id = $1', [id]);
     await client.query('DELETE FROM lost_dog_posts WHERE id = $1', [id]);
 
     await client.query('COMMIT');
@@ -230,47 +221,32 @@ app.delete('/lost_dog_posts/:id', async (req, res) => {
   }
 });
 
+// ROTA PUT /lost_dog_posts/:id
 app.put('/lost_dog_posts/:id', async (req, res) => {
-  const postId = req.params.id;
-
-  const {
-    pet_name,
-    description,
-    breed,
-    color,
-    neighborhood,
-    accessory,
-    location_reference,
-    whatsapp,
-    instagram,
-    pet_age,
-    password,
-    adress,
-    images_urls
-  } = req.body;
+  const { id } = req.params;
+  const { pet_name, description, breed, color, neighborhood, accessory, location_reference, whatsapp, instagram, password, pet_age, adress, images_urls } = req.body;
 
   if (!password) {
-    return res.status(400).json({ error: 'Senha é obrigatória para editar o post.' });
+    return res.status(400).json({ error: "A senha é obrigatória para atualização." });
   }
-
+  
   const client = await pool.connect();
-
   try {
     await client.query('BEGIN');
 
-    const originalPost = await client.query(
-      'SELECT password FROM lost_dog_posts WHERE id = $1',
-      [postId]
-    );
+    const passwordResult = await client.query('SELECT password FROM lost_dog_posts WHERE id = $1', [id]);
 
-    if (originalPost.rows.length === 0) {
+    if (passwordResult.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Post não encontrado.' });
     }
 
-    const validPassword = await bcrypt.compare(password, originalPost.rows[0].password);
-
-    if (!validPassword) {
-      return res.status(401).json({ error: 'Senha incorreta.' });
+    const hashedPassword = passwordResult.rows[0].password;
+    const isPasswordCorrect = await bcrypt.compare(password, hashedPassword);
+    
+    if (!isPasswordCorrect) {
+      await client.query('ROLLBACK');
+      return res.status(401).json({ error: 'Senha incorreta. Não é possível atualizar o post.' });
     }
 
     const updateQuery = `
@@ -301,17 +277,17 @@ app.put('/lost_dog_posts/:id', async (req, res) => {
       instagram,
       pet_age,
       adress,
-      postId
+      id
     ]);
 
-    if (images_urls && Array.isArray(images_urls) && images_urls.length > 0) {
-      await client.query('DELETE FROM post_images WHERE post_id = $1', [postId]);
+    if (images_urls && Array.isArray(images_urls)) {
+      await client.query('DELETE FROM post_images WHERE post_id = $1', [id]);
 
       for (const imageUrl of images_urls) {
         await client.query(`
           INSERT INTO post_images (post_id, image_url)
           VALUES ($1, $2)
-        `, [postId, imageUrl]);
+        `, [id, imageUrl]);
       }
     }
 
@@ -319,18 +295,19 @@ app.put('/lost_dog_posts/:id', async (req, res) => {
 
     res.json({
       message: 'Post atualizado com sucesso!',
-      updated_id: postId
+      updated_id: id
     });
 
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error(err);
-    res.status(500).json({ error: 'Erro ao atualizar post.' });
+    console.error('Erro ao atualizar post:', err);
+    res.status(500).json({ error: 'Erro interno do servidor ao atualizar post.' });
   } finally {
     client.release();
   }
 });
 
+
 app.listen(port, () => {
-  console.log(`Serviço rodando na porta: ${port}`);
+  console.log(`Servidor rodando na porta ${port}`);
 });
