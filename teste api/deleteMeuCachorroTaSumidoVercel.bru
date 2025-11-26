@@ -1,0 +1,20 @@
+meta {
+  name: deleteMeuCachorroTaSumidoVercel
+  type: http
+  seq: 7
+}
+
+delete {
+  url: https://back-end-tf-web-two.vercel.app/lost_dog_posts/12?password=a
+  body: none
+  auth: inherit
+}
+
+params:query {
+  password: a
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

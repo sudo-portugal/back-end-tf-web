@@ -2,10 +2,6 @@ import express from "express";
 import pkg from "pg";
 import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
-import multer from "multer";
-import fs from 'fs/promises';
-import path from "path";
-import { fileURLToPath } from "url";
 
 dotenv.config();
 
@@ -13,26 +9,12 @@ const app = express();
 const port = process.env.PORT || 3000;
 const { Pool } = pkg;
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Remove a necessidade de __filename e __dirname para um back-end de API pura.
+// Remove todas as configurações do Multer e middlewares de arquivos estáticos.
 
-app.use(express.json());
-
-app.use(express.static(path.join(__dirname, 'public')));
-
-app.use(express.static(path.join(__dirname)));
-
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, path.join(__dirname, 'public', 'uploads'));
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const upload = multer({ storage: storage });
+app.use(express.json()); 
+// Se o front-end estiver em um domínio diferente, você precisará de CORS aqui.
+// Ex: import cors from 'cors'; app.use(cors());
 
 const pool = new Pool({
   connectionString: process.env.URL_BD,
@@ -78,7 +60,8 @@ app.get('/lost_dog_posts', async (req, res) => {
   }
 });
 
-app.post('/lost_dog_posts', upload.array('images'), async (req, res) => {
+// ROTA POST: Adaptada para receber JSON com o array de URLs/UUIDs do Uploadcare
+app.post('/lost_dog_posts', async (req, res) => {
   const {
     pet_name,
     description,
@@ -92,9 +75,8 @@ app.post('/lost_dog_posts', upload.array('images'), async (req, res) => {
     pet_age,
     password,
     adress,
+    images_urls // Array de strings de URL do Uploadcare (vindo do JSON)
   } = req.body;
-
-  const files = req.files;
 
   if (!pet_name || !description || !breed || !color || !neighborhood || !password) {
     return res.status(400).json({
@@ -108,8 +90,9 @@ app.post('/lost_dog_posts', upload.array('images'), async (req, res) => {
     });
   }
 
-  if (!files || files.length === 0) {
-    return res.status(400).json({ error: 'Você deve enviar pelo menos uma imagem.' });
+  // Validação: deve ter URLs do Uploadcare
+  if (!images_urls || !Array.isArray(images_urls) || images_urls.length === 0) {
+    return res.status(400).json({ error: 'Você deve enviar pelo menos uma imagem (URL do Uploadcare).' });
   }
 
   const client = await pool.connect();
@@ -149,9 +132,8 @@ app.post('/lost_dog_posts', upload.array('images'), async (req, res) => {
 
     const uploadedImageUrls = [];
 
-    for (const file of files) {
-      const imageUrl = `/uploads/${file.filename}`;
-
+    // Salvar as URLs do Uploadcare no banco
+    for (const imageUrl of images_urls) {
       uploadedImageUrls.push(imageUrl);
 
       const insertImageQuery = `
@@ -210,10 +192,11 @@ app.get('/lost_dog_posts/:id', async (req, res) => {
   }
 });
 
+// ROTA DELETE: Removida a lógica de deletar arquivos locais
 app.delete('/lost_dog_posts/:id', async (req, res) => {
   const { id } = req.params;
-  // A correção está aqui: a senha é pega dos query parameters (ex: ?password=...)
-  const { password } = req.query;
+  // A senha deve vir no corpo (req.body) para o delete ser seguro
+  const { password } = req.body; 
 
   if (!password) {
     return res.status(400).json({ error: 'Senha é obrigatória.' });
@@ -230,7 +213,6 @@ app.delete('/lost_dog_posts/:id', async (req, res) => {
     }
 
     const storedHashedPassword = postResult.rows[0].password;
-
     const isMatch = await bcrypt.compare(password, storedHashedPassword);
 
     if (!isMatch) {
@@ -239,25 +221,13 @@ app.delete('/lost_dog_posts/:id', async (req, res) => {
 
     await client.query('BEGIN');
 
-    const imageQuery = 'SELECT image_url FROM post_images WHERE post_id = $1';
-    const imagesResult = await client.query(imageQuery, [id]);
-    const imageUrls = imagesResult.rows.map(row => row.image_url);
-
+    // Deleta as referências das imagens no banco de dados (o Uploadcare mantém os arquivos)
     await client.query('DELETE FROM post_images WHERE post_id = $1', [id]);
     
+    // Deleta o post principal
     await client.query('DELETE FROM lost_dog_posts WHERE id = $1', [id]);
 
     await client.query('COMMIT');
-
-    for (const url of imageUrls) {
-      try {
-        const filename = url.split('/').pop();
-        const filePath = path.join(__dirname, 'public', 'uploads', filename);
-        await fs.unlink(filePath);
-      } catch (fileErr) {
-        console.error(`Erro ao deletar arquivo ${url}:`, fileErr.message);
-      }
-    }
     
     res.status(200).json({ message: 'Post deletado com sucesso.' });
 
@@ -270,32 +240,111 @@ app.delete('/lost_dog_posts/:id', async (req, res) => {
   }
 });
 
+// ROTA PUT: Adaptada para não usar o Multer (multipart/form-data)
+// Se a imagem puder ser atualizada aqui, você precisará de uma nova rota PUT separada para isso.
 app.put('/lost_dog_posts/:id', async (req, res) => {
-  const { id } = req.params;
-  const { pet_name } = req.body;
+  const postId = req.params.id;
 
-  if (!pet_name) {
-    return res.status(400).json({ error: "O campo pet_name é obrigatório." });
+  const {
+    pet_name,
+    description,
+    breed,
+    color,
+    neighborhood,
+    accessory,
+    location_reference,
+    whatsapp,
+    instagram,
+    pet_age,
+    password,
+    adress,
+    images_urls // Se este campo for enviado, você pode atualizá-lo.
+  } = req.body;
+
+  if (!password) {
+    return res.status(400).json({ error: 'Senha é obrigatória para editar o post.' });
   }
 
+  const client = await pool.connect();
+
   try {
-    const result = await pool.query(
-      `UPDATE lost_dog_posts SET pet_name = $1 WHERE id = $2 RETURNING id, pet_name`,
-      [pet_name, id]
+    await client.query('BEGIN');
+
+    // 1. Buscar post original e verificar senha
+    const originalPost = await client.query(
+      'SELECT password FROM lost_dog_posts WHERE id = $1',
+      [postId]
     );
 
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: "Post não encontrado." });
+    if (originalPost.rows.length === 0) {
+      return res.status(404).json({ error: 'Post não encontrado.' });
     }
 
-    res.status(200).json({
-      message: "Nome atualizado com sucesso!",
-      updated: result.rows[0]
+    const validPassword = await bcrypt.compare(password, originalPost.rows[0].password);
+
+    if (!validPassword) {
+      return res.status(401).json({ error: 'Senha incorreta.' });
+    }
+
+    // 2. Atualizar post (usando COALESCE para manter valores antigos se não forem enviados)
+    const updateQuery = `
+      UPDATE lost_dog_posts SET
+        pet_name = COALESCE($1, pet_name),
+        description = COALESCE($2, description),
+        breed = COALESCE($3, breed),
+        color = COALESCE($4, color),
+        neighborhood = COALESCE($5, neighborhood),
+        accessory = COALESCE($6, accessory),
+        location_reference = COALESCE($7, location_reference),
+        whatsapp = COALESCE($8, whatsapp),
+        instagram = COALESCE($9, instagram),
+        pet_age = COALESCE($10, pet_age),
+        adress = COALESCE($11, adress)
+      WHERE id = $12;
+    `;
+
+    await client.query(updateQuery, [
+      pet_name,
+      description,
+      breed,
+      color,
+      neighborhood,
+      accessory,
+      location_reference,
+      whatsapp,
+      instagram,
+      pet_age,
+      adress,
+      postId
+    ]);
+
+    // 3. Se houver URLs de imagem, sobrescrever as imagens antigas
+    if (images_urls && Array.isArray(images_urls) && images_urls.length > 0) {
+      // Deletar referências antigas
+      await client.query('DELETE FROM post_images WHERE post_id = $1', [postId]);
+
+      // Inserir novas referências
+      for (const imageUrl of images_urls) {
+        await client.query(`
+          INSERT INTO post_images (post_id, image_url)
+          VALUES ($1, $2)
+        `, [postId, imageUrl]);
+      }
+    }
+
+    await client.query('COMMIT');
+
+    res.json({
+      message: 'Post atualizado com sucesso!',
+      updated_id: postId
     });
 
-  } catch (error) {
-    console.error("Erro ao atualizar o nome:", error);
-    res.status(500).json({ error: "Erro interno do servidor." });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ error: 'Erro ao atualizar post.' });
+  } finally {
+    client.release();
   }
 });
 

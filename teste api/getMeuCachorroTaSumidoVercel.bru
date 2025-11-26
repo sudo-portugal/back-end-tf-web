@@ -1,0 +1,16 @@
+meta {
+  name: getMeuCachorroTaSumidoVercel
+  type: http
+  seq: 6
+}
+
+get {
+  url: https://back-end-tf-web-two.vercel.app/lost_dog_posts
+  body: none
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
