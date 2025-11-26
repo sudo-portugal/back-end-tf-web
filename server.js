@@ -2,6 +2,7 @@ import express from "express";
 import pkg from "pg";
 import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
+import cors from 'cors';
 
 dotenv.config();
 
@@ -9,12 +10,8 @@ const app = express();
 const port = process.env.PORT || 3000;
 const { Pool } = pkg;
 
-// Remove a necessidade de __filename e __dirname para um back-end de API pura.
-// Remove todas as configurações do Multer e middlewares de arquivos estáticos.
-
 app.use(express.json()); 
-// Se o front-end estiver em um domínio diferente, você precisará de CORS aqui.
-// Ex: import cors from 'cors'; app.use(cors());
+app.use(cors()); 
 
 const pool = new Pool({
   connectionString: process.env.URL_BD,
@@ -60,7 +57,6 @@ app.get('/lost_dog_posts', async (req, res) => {
   }
 });
 
-// ROTA POST: Adaptada para receber JSON com o array de URLs/UUIDs do Uploadcare
 app.post('/lost_dog_posts', async (req, res) => {
   const {
     pet_name,
@@ -75,7 +71,7 @@ app.post('/lost_dog_posts', async (req, res) => {
     pet_age,
     password,
     adress,
-    images_urls // Array de strings de URL do Uploadcare (vindo do JSON)
+    images_urls
   } = req.body;
 
   if (!pet_name || !description || !breed || !color || !neighborhood || !password) {
@@ -90,7 +86,6 @@ app.post('/lost_dog_posts', async (req, res) => {
     });
   }
 
-  // Validação: deve ter URLs do Uploadcare
   if (!images_urls || !Array.isArray(images_urls) || images_urls.length === 0) {
     return res.status(400).json({ error: 'Você deve enviar pelo menos uma imagem (URL do Uploadcare).' });
   }
@@ -132,7 +127,6 @@ app.post('/lost_dog_posts', async (req, res) => {
 
     const uploadedImageUrls = [];
 
-    // Salvar as URLs do Uploadcare no banco
     for (const imageUrl of images_urls) {
       uploadedImageUrls.push(imageUrl);
 
@@ -192,10 +186,8 @@ app.get('/lost_dog_posts/:id', async (req, res) => {
   }
 });
 
-// ROTA DELETE: Removida a lógica de deletar arquivos locais
 app.delete('/lost_dog_posts/:id', async (req, res) => {
   const { id } = req.params;
-  // A senha deve vir no corpo (req.body) para o delete ser seguro
   const { password } = req.body; 
 
   if (!password) {
@@ -221,10 +213,8 @@ app.delete('/lost_dog_posts/:id', async (req, res) => {
 
     await client.query('BEGIN');
 
-    // Deleta as referências das imagens no banco de dados (o Uploadcare mantém os arquivos)
     await client.query('DELETE FROM post_images WHERE post_id = $1', [id]);
     
-    // Deleta o post principal
     await client.query('DELETE FROM lost_dog_posts WHERE id = $1', [id]);
 
     await client.query('COMMIT');
@@ -240,8 +230,6 @@ app.delete('/lost_dog_posts/:id', async (req, res) => {
   }
 });
 
-// ROTA PUT: Adaptada para não usar o Multer (multipart/form-data)
-// Se a imagem puder ser atualizada aqui, você precisará de uma nova rota PUT separada para isso.
 app.put('/lost_dog_posts/:id', async (req, res) => {
   const postId = req.params.id;
 
@@ -258,7 +246,7 @@ app.put('/lost_dog_posts/:id', async (req, res) => {
     pet_age,
     password,
     adress,
-    images_urls // Se este campo for enviado, você pode atualizá-lo.
+    images_urls
   } = req.body;
 
   if (!password) {
@@ -270,7 +258,6 @@ app.put('/lost_dog_posts/:id', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // 1. Buscar post original e verificar senha
     const originalPost = await client.query(
       'SELECT password FROM lost_dog_posts WHERE id = $1',
       [postId]
@@ -286,7 +273,6 @@ app.put('/lost_dog_posts/:id', async (req, res) => {
       return res.status(401).json({ error: 'Senha incorreta.' });
     }
 
-    // 2. Atualizar post (usando COALESCE para manter valores antigos se não forem enviados)
     const updateQuery = `
       UPDATE lost_dog_posts SET
         pet_name = COALESCE($1, pet_name),
@@ -318,12 +304,9 @@ app.put('/lost_dog_posts/:id', async (req, res) => {
       postId
     ]);
 
-    // 3. Se houver URLs de imagem, sobrescrever as imagens antigas
     if (images_urls && Array.isArray(images_urls) && images_urls.length > 0) {
-      // Deletar referências antigas
       await client.query('DELETE FROM post_images WHERE post_id = $1', [postId]);
 
-      // Inserir novas referências
       for (const imageUrl of images_urls) {
         await client.query(`
           INSERT INTO post_images (post_id, image_url)
