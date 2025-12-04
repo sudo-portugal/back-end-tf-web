@@ -34,7 +34,6 @@ app.get("/", async (req, res) => {
   });
 });
 
-// ROTA GET /lost_dog_posts (COM FILTRO)
 app.get('/lost_dog_posts', async (req, res) => {
   const client = await pool.connect();
   try {
@@ -89,12 +88,20 @@ app.get('/lost_dog_posts', async (req, res) => {
   }
 });
 
-// ROTA POST /lost_dog_posts
 app.post('/lost_dog_posts', async (req, res) => {
   const { pet_name, description, breed, color, neighborhood, accessory, location_reference, whatsapp, instagram, password, pet_age, adress, images_urls } = req.body;
 
+  if (images_urls && images_urls.length > 5) {
+    return res.status(400).json({ error: "O limite máximo é de 5 imagens." });
+  }
+
   if (!pet_name || !description || !breed || !color || !neighborhood || !whatsapp || !password || !images_urls || images_urls.length === 0) {
     return res.status(400).json({ error: "Preencha todos os campos obrigatórios, incluindo ao menos uma imagem e a senha." });
+  }
+
+  const cleanWhatsapp = whatsapp.replace(/\D/g, '');
+  if (cleanWhatsapp.length < 10 || cleanWhatsapp.length > 11) {
+    return res.status(400).json({ error: "Número de WhatsApp inválido." });
   }
 
   const client = await pool.connect();
@@ -111,7 +118,7 @@ app.post('/lost_dog_posts', async (req, res) => {
     `;
 
     const result = await client.query(insertPostQuery, [
-      pet_name, description, breed, color, neighborhood, accessory || null, location_reference || null, whatsapp, instagram || null, hashedPassword, pet_age || null, adress || null
+      pet_name, description, breed, color, neighborhood, accessory || null, location_reference || null, cleanWhatsapp, instagram || null, hashedPassword, pet_age || null, adress || null
     ]);
 
     const newPostId = result.rows[0].id;
@@ -140,7 +147,6 @@ app.post('/lost_dog_posts', async (req, res) => {
   }
 });
 
-// ROTA GET /lost_dog_posts/:id
 app.get('/lost_dog_posts/:id', async (req, res) => {
   const { id } = req.params;
   const client = await pool.connect();
@@ -177,7 +183,6 @@ app.get('/lost_dog_posts/:id', async (req, res) => {
   }
 });
 
-// ROTA DELETE /lost_dog_posts/:id
 app.delete('/lost_dog_posts/:id', async (req, res) => {
   const { id } = req.params;
   const { password } = req.body;
@@ -221,13 +226,24 @@ app.delete('/lost_dog_posts/:id', async (req, res) => {
   }
 });
 
-// ROTA PUT /lost_dog_posts/:id
 app.put('/lost_dog_posts/:id', async (req, res) => {
   const { id } = req.params;
   const { pet_name, description, breed, color, neighborhood, accessory, location_reference, whatsapp, instagram, password, pet_age, adress, images_urls } = req.body;
 
+  if (images_urls && images_urls.length > 5) {
+    return res.status(400).json({ error: "O limite máximo é de 5 imagens." });
+  }
+
   if (!password) {
     return res.status(400).json({ error: "A senha é obrigatória para atualização." });
+  }
+
+  let cleanWhatsapp = whatsapp;
+  if (whatsapp) {
+      cleanWhatsapp = whatsapp.replace(/\D/g, '');
+      if (cleanWhatsapp.length < 10 || cleanWhatsapp.length > 11) {
+        return res.status(400).json({ error: "Número de WhatsApp inválido." });
+      }
   }
   
   const client = await pool.connect();
@@ -273,7 +289,7 @@ app.put('/lost_dog_posts/:id', async (req, res) => {
       neighborhood,
       accessory,
       location_reference,
-      whatsapp,
+      cleanWhatsapp,
       instagram,
       pet_age,
       adress,
@@ -306,7 +322,6 @@ app.put('/lost_dog_posts/:id', async (req, res) => {
     client.release();
   }
 });
-
 
 app.listen(port, () => {
   console.log(`Servidor rodando na porta ${port}`);
