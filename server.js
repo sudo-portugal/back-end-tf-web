@@ -134,8 +134,7 @@ app.post('/lost_dog_posts', async (req, res) => {
     await client.query('COMMIT');
 
     res.status(201).json({ 
-      message: 'Post criado com sucesso!', 
-      post_id: newPostId 
+      message: 'Post criado com sucesso!'
     });
 
   } catch (err) {
